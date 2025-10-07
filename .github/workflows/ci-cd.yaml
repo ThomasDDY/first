@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  build-and-deploy:
+  build-push-deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,19 +16,32 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Build Frontend Image
-      run: |
-        docker build -t frontend-local:latest ./frontend
-        minikube image load frontend-local:latest
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build Backend Image
+    - name: Build and Push Frontend Image
       run: |
-        docker build -t backend-local:latest ./backend
-        minikube image load backend-local:latest
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest ./frontend
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
 
-    - name: Apply Kubernetes Manifests
+    - name: Build and Push Backend Image
       run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/backend:latest ./backend
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/backend:latest
+
+    - name: Set up kubeconfig
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 --decode > $HOME/.kube/config
+
+    - name: Deploy to Kubernetes
+      run: |
+        # Update Deployment images
+        kubectl set image deployment/frontend frontend=${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest -n mini-project
+        kubectl set image deployment/backend backend=${{ secrets.DOCKERHUB_USERNAME }}/backend:latest -n mini-project
+        
+        # Apply manifests (if new resources or updates)
         kubectl apply -f k8s/mysql-deployment.yaml
-        kubectl apply -f k8s/backend-deployment.yaml
-        kubectl apply -f k8s/frontend-deployment.yaml
         kubectl apply -f k8s/ingress.yaml
